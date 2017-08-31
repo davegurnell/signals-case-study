@@ -11,33 +11,24 @@ object Main extends App {
   val address = new InetSocketAddress(8888)
 
   open[IO](address).flatMap { serverSocket =>
-    Stream.eval(serverSocket.localAddress)
-      .map(_.getPort)
-      .flatMap { serverPort =>
-        println(serverPort)
-        val serverAddress = new InetSocketAddress(serverPort)
-        val server = serverSocket
-          .reads()
-          .evalMap { inputPacket =>
-            serverSocket.write(handle(inputPacket))
-          }
-          .drain
-//          val client = open[IO]()
-//            .flatMap { clientSocket =>
-//              Stream(Packet(serverAddress, msg))
-//                .covary[IO]
-//                .to(clientSocket.writes())
-//                .drain ++
-//              Stream.eval(clientSocket.read())
-//            }
-      server //.mergeHaltBoth(client)
-    }
+    handleStream(serverSocket.reads())
+      .evalMap(serverSocket.write(_))
+      .drain
   }.runLog.unsafeRunSync
 
-  def handle(inputPacket: Packet): Packet = {
-    val inputString = new String(inputPacket.bytes.toBytes.values, "utf-8")
-    val outputString = inputString.trim.reverse + "\n"
-    val outputPacket = Packet(inputPacket.remote, Chunk.Bytes(outputString.getBytes("utf-8")))
-    outputPacket
-  }
+  def handleStream(inputStream: Stream[IO, Packet]): Stream[IO, Packet] =
+    inputStream.flatMap(handlePacket)
+
+  def handlePacket(inputPacket: Packet): Stream[IO, Packet] =
+    handleString(packetToString(inputPacket))
+      .map(stringToPacket(inputPacket.remote))
+
+  def handleString(input: String): Stream[IO, String] =
+    Stream.eval(IO(input.reverse))
+
+  private def packetToString(packet: Packet): String =
+    new String(packet.bytes.toBytes.values, "utf-8").trim
+
+  private def stringToPacket(remote: InetSocketAddress)(string: String): Packet =
+    Packet(remote, Chunk.Bytes(s"$string\n".getBytes("utf-8")))
 }
