@@ -8,32 +8,29 @@ import scala.concurrent.ExecutionContext.Implicits.global
 
 // Connect from the command line using:
 //     nc -u localhost 8888
-object Main {
+object Main extends App {
   implicit val group = AsynchronousSocketGroup()
 
   val address = new InetSocketAddress(8888)
 
+  val messageHandler = MessageHandler.reverseMessages
+
   // TODO: This doesn't listen for disconnects:
   open[IO](address).flatMap { serverSocket =>
-    Handlers.handleStream(serverSocket.reads())
+    handleStream(serverSocket.reads())
       .evalMap(serverSocket.write(_))
       .drain
   }.runLog.unsafeRunSync
-}
 
-object Handlers {
   def handleStream(inputStream: Stream[IO, Packet]): Stream[IO, Packet] =
     inputStream.flatMap(handlePacket)
 
   def handlePacket(inputPacket: Packet): Stream[IO, Packet] = {
     val inputString: String = packetToString(inputPacket)
-    val outputStrings: Stream[IO, String] = handleString(inputString)
+    val outputStrings: Stream[IO, String] = messageHandler(inputString)
     val outputPackets: Stream[IO, Packet] = outputStrings.map(stringToPacket(inputPacket.remote))
     outputPackets
   }
-
-  def handleString(input: String): Stream[IO, String] =
-    Stream.eval(IO(input.reverse))
 
   private def packetToString(packet: Packet): String =
     new String(packet.bytes.toBytes.values, "utf-8").trim
